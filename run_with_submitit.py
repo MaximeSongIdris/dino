@@ -29,7 +29,8 @@ def parse_args():
     parser.add_argument("--ngpus", default=8, type=int, help="Number of gpus to request on each node")
     parser.add_argument("--nodes", default=2, type=int, help="Number of nodes to request")
     parser.add_argument("--timeout", default=2800, type=int, help="Duration of the job")
-
+    parser.add_argument("--qos", default="qos_gpu-t3", type=str, help="QoS of the job")
+    parser.add_argument("--account", default="uli@v100", type=str, help="Account for the accounting")
     parser.add_argument("--partition", default="learnfair", type=str, help="Partition where to submit")
     parser.add_argument("--use_volta32", action='store_true', help="Big models? Use this")
     parser.add_argument('--comment', default="", type=str,
@@ -46,10 +47,14 @@ def get_shared_folder() -> Path:
     raise RuntimeError("No shared folder available")
 
 
-def get_init_file():
+def get_init_file(dir_path=None):
     # Init file must not exist, but it's parent dir must exist.
-    os.makedirs(str(get_shared_folder()), exist_ok=True)
-    init_file = get_shared_folder() / f"{uuid.uuid4().hex}_init"
+    if dir_path is None:
+        os.makedirs(str(get_shared_folder()), exist_ok=True)
+        init_file = get_shared_folder() / f"{uuid.uuid4().hex}_init"
+    else:
+        os.makedirs(dir_path, exist_ok=True)
+        init_file = Path(dir_path) / f"{uuid.uuid4().hex}_init"
     if init_file.exists():
         os.remove(str(init_file))
     return init_file
@@ -96,6 +101,8 @@ def main():
     num_gpus_per_node = args.ngpus
     nodes = args.nodes
     timeout_min = args.timeout
+    account = args.account
+    qos = args.qos
 
     partition = args.partition
     kwargs = {}
@@ -105,7 +112,6 @@ def main():
         kwargs['slurm_comment'] = args.comment
 
     executor.update_parameters(
-        mem_gb=40 * num_gpus_per_node,
         gpus_per_node=num_gpus_per_node,
         tasks_per_node=num_gpus_per_node,  # one task per GPU
         cpus_per_task=10,
@@ -114,12 +120,15 @@ def main():
         # Below are cluster dependent parameters
         slurm_partition=partition,
         slurm_signal_delay_s=120,
+        slurm_account=account,
+        slurm_qos=qos,
         **kwargs
     )
 
     executor.update_parameters(name="dino")
 
-    args.dist_url = get_init_file().as_uri()
+    ##### PROBLEM HERE
+    args.dist_url = get_init_file(args.output_dir).as_uri()
 
     trainer = Trainer(args)
     job = executor.submit(trainer)
