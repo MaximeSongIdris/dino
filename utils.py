@@ -25,6 +25,7 @@ import random
 import datetime
 import subprocess
 from collections import defaultdict, deque
+import hostlist
 
 import numpy as np
 import torch
@@ -470,10 +471,13 @@ def init_distributed_mode(args):
         args.rank = int(os.environ["RANK"])
         args.world_size = int(os.environ['WORLD_SIZE'])
         args.gpu = int(os.environ['LOCAL_RANK'])
-    # launched with submitit on a slurm cluster
+    # launched with submitit on a slurm cluster / with slurm script
     elif 'SLURM_PROCID' in os.environ:
         args.rank = int(os.environ['SLURM_PROCID'])
+        args.world_size = int(os.environ['SLURM_NTASKS'])
         args.gpu = args.rank % torch.cuda.device_count()
+        os.environ['MASTER_ADDR'] = hostlist.expand_hostlist(os.environ['SLURM_JOB_NODELIST'])[0]
+        os.environ['MASTER_PORT'] = '19500'
     # launched naively with `python main_dino.py`
     # we manually add MASTER_ADDR and MASTER_PORT to env variables
     elif torch.cuda.is_available():
