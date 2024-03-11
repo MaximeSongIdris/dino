@@ -37,6 +37,7 @@ from vision_transformer import DINOHead
 ### code initially duplicated from main_dino.py
 from main_dino import get_args_parser, DINOLoss, DataAugmentationDINO
 from coco_dataset import COCODataset
+import wandb
 
 
 torchvision_archs = sorted(name for name in torchvision_models.__dict__
@@ -99,7 +100,7 @@ def build_coco_dataloader(args):
 
 
 def build_model(args):
-    """Code from dino_main.py""""
+    """Code from dino_main.py"""
     
     # ============ building student and teacher networks ... ============
     # we changed the name DeiT-S for ViT-S to avoid confusions
@@ -183,7 +184,8 @@ def train_dino(args):
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
     elif args.optimizer == "sgd":
         optimizer = torch.optim.SGD(params_groups, lr=0, momentum=0.9)  # lr is set by scheduler
-    elif args.optimizer == "lars":
+    elif args.optimizer == "lars":    logger = setup_logger(output=args.output_dir,
+                          distributed_rank=dist.get_rank(), name="slotcon")
         optimizer = utils.LARS(params_groups)  # to use with convnet and large batches
     # for mixed precision training
     fp16_scaler = None
@@ -310,14 +312,74 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
         metric_logger.update(loss=loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
+        
+        # log batch metrics to wandb with only rank 0 process
+        if args.rank == 0:
+            wandb.log({
+                "train/batch/global_steps": it,
+                "train/batch/dino_loss": dist.all_reduce(loss, op=dist.ReduceOp.AVG).item(),
+                "train/batch/lr": lr_schedule[it],
+                "train/batch/wd": wd_schedule[it],
+                "train/batch/teacher_update_momentum": momentum_schedule[it],
+            })
+        
+    # log epoch metrics to wandb with only rank 0 process
+    if args.rank == 0:
+        wandb.log({
+            "train/epoch/epoch": epoch,
+            "train/epoch/teacher_temp": dino_loss.teacher_temp_schedule[epoch],            
+            "train/epoch/student temp": dino_loss.student_temp,
+        })
+    
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
+    
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
 if __name__ == '__main__':
+    # get script arguments
     parser = argparse.ArgumentParser('DINO', parents=[get_args_parser()])
     args = parser.parse_args()
+    
+    # create output directory
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    
+    # setup wandb
+    if args.rank == 0:
+        run = wandb.init(
+            # Set the project where this run will be logged
+            project="DINO_pretrained_COCO",
+            # Track hyperparameters
+            config={
+                "arch":  args.arch,
+                "patch_size" : args.patch_size,
+                "out_dim" : args.out_dim,
+                "norm_last_layer" : args.norm_last_layer,
+                "momentum_teacher" : args.momentum_teacher,
+                "use_bn_in_head" : args.use_bn_in_head,
+                "warmup_teacher_temp" : args.warmup_teacher_temp,
+                "teacher_temp" : args.teacher_temp,
+                "warmup_teacher_temp_epochs" : args.warmup_teacher_temp_epochs,
+                "use_fp16" : args.use_fp16,
+                "weight_decay" : args.weight_decay,
+                "weight_decay_end" : args.weight_decay_end, 
+                "clip_grad" : args.clip_grad,
+                "batch_size_per_gpu" : args.batch_size_per_gpu,
+                "epochs" : args.epochs,
+                "freeze_last_layer" : args.freeze_last_layer,
+                "lr" : args.lr,
+                "warmup_epochs" : args.warmup_epochs,
+                "min_lr" : args.min_lr,
+                "optimizer" : args.optimizer,
+                "drop_path_rate" : args.drop_path_rate,
+                "global_crops_scale" : args.global_crops_scale,
+                "local_crops_number" : args.local_crops_number,
+                "local_crops_scale" : args.local_crops_scale,
+            },
+            mode="offline",
+        )
+    
+    # train model
     train_dino(args)
