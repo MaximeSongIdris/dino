@@ -35,10 +35,10 @@ class COCODataset(Dataset):
             self.num_cat = len(self.cat_ids) # TODO only use no crowd annotations ???
         elif dataset == 'COCOplus':
             self.fpaths = glob.glob(data_dir + '/train2017/*.jpg') + glob.glob(data_dir + '/unlabeled2017/*.jpg')
-            self.fpaths = np.array(self.fnames) # to avoid memory leak
+            self.fpaths = np.array(self.fpaths) # to avoid memory leak
         elif dataset == 'COCOval':
             self.fpaths = glob.glob(data_dir + '/val2017/*.jpg')
-            self.fpaths = np.array(self.fnames) # to avoid memory leak
+            self.fpaths = np.array(self.fpaths) # to avoid memory leak
         else:
             raise NotImplementedError
         self.dataset = dataset
@@ -90,7 +90,7 @@ class COCODataset(Dataset):
             # type : tuple[torch.tensor, tuple[torch.tensor, torch.tensor]]
             return transfo_img, (anns_img, one_hot_mask)
         
-        fpath = self.fnames[idx]
+        fpath = self.fpaths[idx]
         image = Image.open(fpath).convert('RGB')
         # type : tuple[torch.tensor, None]
         return self.transform(image), None
