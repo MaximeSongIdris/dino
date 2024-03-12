@@ -25,7 +25,7 @@ class COCODataset(Dataset):
             self.coco = COCO(ann_file)
             self.ids = self.coco.getImgIds() # list of image id
             self.cat_ids = self.coco.getCatIds() # list of cat id
-            self.root = data_dir + '/train2017/'
+            self.img_dir = data_dir + '/train2017/'
             self.target_transform = transforms.Compose([
                 transforms.ToPILImage(),
                 transforms.Resize(224, interpolation=TF.InterpolationMode.NEAREST),
@@ -57,7 +57,7 @@ class COCODataset(Dataset):
             # type : PIL.Image.Image
             # size : (W, H)
             fname = self.coco.loadImgs(img_id)[0]['file_name']
-            image = Image.open(os.path.join(self.root, fname)).convert('RGB')
+            image = Image.open(os.path.join(self.img_dir, fname)).convert('RGB')
 
             # Get all the annotations linked to our image
             ann_ids = self.coco.getAnnIds(imgIds=img_id)

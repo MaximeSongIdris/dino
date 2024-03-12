@@ -85,7 +85,6 @@ def build_coco_dataloader(args):
     )
     # args.data_path = '/gpfswork/rech/uli/ssos027/dino_experience/data/COCO'
     dataset = COCODataset('COCO', args.data_path, transform)
-    ##### TODO
     sampler = torch.utils.data.distributed.DistributedSampler(dataset)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -97,6 +96,8 @@ def build_coco_dataloader(args):
         shuffle=(sampler is None), 
     )
     print(f"Data loaded: there are {len(dataset)} images.")
+    
+    return data_loader
 
 
 def build_model(args):
@@ -125,8 +126,49 @@ def build_model(args):
     
 
 def train_dino(args):
-    utils.init_distributed_mode(args)
+    # remove elements of randomness to have better reproductilbity
+    # for exemple : random / numpy / torch / torch.cuda can generate random values
     utils.fix_random_seeds(args.seed)
+    
+    # will add rank and world_size keys to args
+    utils.init_distributed_mode(args)
+    
+    # setup wandb
+    if args.rank == 0:
+        run = wandb.init(
+            # Set the project where this run will be logged
+            project="DINO_pretrained_COCO",
+            # Track hyperparameters
+            config={
+                "arch":  args.arch,
+                "patch_size" : args.patch_size,
+                "out_dim" : args.out_dim,
+                "norm_last_layer" : args.norm_last_layer,
+                "momentum_teacher" : args.momentum_teacher,
+                "use_bn_in_head" : args.use_bn_in_head,
+                "warmup_teacher_temp" : args.warmup_teacher_temp,
+                "teacher_temp" : args.teacher_temp,
+                "warmup_teacher_temp_epochs" : args.warmup_teacher_temp_epochs,
+                "use_fp16" : args.use_fp16,
+                "weight_decay" : args.weight_decay,
+                "weight_decay_end" : args.weight_decay_end, 
+                "clip_grad" : args.clip_grad,
+                "batch_size_per_gpu" : args.batch_size_per_gpu,
+                "total_gpus": args.world_size,
+                "epochs" : args.epochs,
+                "freeze_last_layer" : args.freeze_last_layer,
+                "lr" : args.lr,
+                "warmup_epochs" : args.warmup_epochs,
+                "min_lr" : args.min_lr,
+                "optimizer" : args.optimizer,
+                "drop_path_rate" : args.drop_path_rate,
+                "global_crops_scale" : args.global_crops_scale,
+                "local_crops_number" : args.local_crops_number,
+                "local_crops_scale" : args.local_crops_scale,
+            },
+            mode="offline",
+        )    
+    
     print("git:\n  {}\n".format(utils.get_sha()))
     print("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
     cudnn.benchmark = True
@@ -184,8 +226,7 @@ def train_dino(args):
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
     elif args.optimizer == "sgd":
         optimizer = torch.optim.SGD(params_groups, lr=0, momentum=0.9)  # lr is set by scheduler
-    elif args.optimizer == "lars":    logger = setup_logger(output=args.output_dir,
-                          distributed_rank=dist.get_rank(), name="slotcon")
+    elif args.optimizer == "lars":
         optimizer = utils.LARS(params_groups)  # to use with convnet and large batches
     # for mixed precision training
     fp16_scaler = None
@@ -345,41 +386,6 @@ if __name__ == '__main__':
     
     # create output directory
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    
-    # setup wandb
-    if args.rank == 0:
-        run = wandb.init(
-            # Set the project where this run will be logged
-            project="DINO_pretrained_COCO",
-            # Track hyperparameters
-            config={
-                "arch":  args.arch,
-                "patch_size" : args.patch_size,
-                "out_dim" : args.out_dim,
-                "norm_last_layer" : args.norm_last_layer,
-                "momentum_teacher" : args.momentum_teacher,
-                "use_bn_in_head" : args.use_bn_in_head,
-                "warmup_teacher_temp" : args.warmup_teacher_temp,
-                "teacher_temp" : args.teacher_temp,
-                "warmup_teacher_temp_epochs" : args.warmup_teacher_temp_epochs,
-                "use_fp16" : args.use_fp16,
-                "weight_decay" : args.weight_decay,
-                "weight_decay_end" : args.weight_decay_end, 
-                "clip_grad" : args.clip_grad,
-                "batch_size_per_gpu" : args.batch_size_per_gpu,
-                "epochs" : args.epochs,
-                "freeze_last_layer" : args.freeze_last_layer,
-                "lr" : args.lr,
-                "warmup_epochs" : args.warmup_epochs,
-                "min_lr" : args.min_lr,
-                "optimizer" : args.optimizer,
-                "drop_path_rate" : args.drop_path_rate,
-                "global_crops_scale" : args.global_crops_scale,
-                "local_crops_number" : args.local_crops_number,
-                "local_crops_scale" : args.local_crops_scale,
-            },
-            mode="offline",
-        )
     
     # train model
     train_dino(args)
