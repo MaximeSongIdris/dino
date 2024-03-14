@@ -355,10 +355,11 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
         
         # log batch metrics to wandb with only rank 0 process
+        dist.all_reduce(loss, op=dist.ReduceOp.AVG)
         if args.rank == 0:
             wandb.log({
                 "train/batch/global_steps": it,
-                "train/batch/dino_loss": dist.all_reduce(loss, op=dist.ReduceOp.AVG).item(),
+                "train/batch/dino_loss": loss.item(),
                 "train/batch/lr": lr_schedule[it],
                 "train/batch/wd": wd_schedule[it],
                 "train/batch/teacher_update_momentum": momentum_schedule[it],
