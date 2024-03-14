@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Code initially duplicated from main_dino.py"""
 import argparse
 import os
 import sys
@@ -20,53 +21,26 @@ import math
 import json
 from pathlib import Path
 
-import numpy as np
-from PIL import Image
 import torch
 import torch.nn as nn
 import torch.distributed as dist
 import torch.backends.cudnn as cudnn
-import torch.nn.functional as F
-from torchvision import datasets, transforms
 from torchvision import models as torchvision_models
 
 import utils
 import vision_transformer as vits
 from vision_transformer import DINOHead
 
-### code initially duplicated from main_dino.py
+### import needed in addition to those already in main_dino.py
+import signal
+import wandb
 from main_dino import get_args_parser, DINOLoss, DataAugmentationDINO
 from coco_dataset import COCODataset
-import wandb
 
 
 torchvision_archs = sorted(name for name in torchvision_models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(torchvision_models.__dict__[name]))
-
-
-def build_imagenet_dataloader(args):
-    """Code from dino_main.py to build imagenet"""
-    
-    transform = DataAugmentationDINO(
-        args.global_crops_scale,
-        args.local_crops_scale,
-        args.local_crops_number,
-    )
-    dataset = datasets.ImageFolder(args.data_path, transform=transform)
-    sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
-    data_loader = torch.utils.data.DataLoader(
-        dataset,
-        sampler=sampler,
-        batch_size=args.batch_size_per_gpu,
-        num_workers=args.num_workers,
-        pin_memory=True,
-        drop_last=True,
-        shuffle=(sampler is None), 
-    )
-    print(f"Data loaded: there are {len(dataset)} images.")
-    
-    return data_loader
 
 
 def build_coco_dataloader(args):
@@ -266,6 +240,11 @@ def train_dino(args):
     start_time = time.time()
     print("Starting DINO training !")
     for epoch in range(start_epoch, args.epochs):
+        # end the program if the slurm job is reaching walltime limit
+        # useful only if the code is runned via slurm
+        if SLURM_JOB_WALLTIME_LIMIT_REACHED:
+            sys.exit(12)
+            
         data_loader.sampler.set_epoch(epoch)
 
         # ============ training one epoch of DINO ... ============
@@ -381,6 +360,23 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
 
 
 if __name__ == '__main__':
+    # Why do we interrupt the program : the slurm job is reaching its walltime limit
+    # and we wish to resubmit automatically a new slurm job, which required to stop 
+    # properly the program.
+    # How do we know when to interrupt : by catching a signal, this signal is emmited
+    # by slurm right before the walltime limit.
+    # Global variable that indicates if the program should be interrupted.
+    SLURM_JOB_WALLTIME_LIMIT_REACHED = False
+    # Function called when the signal is catched. 
+    # Here we set SLURM_JOB_WALLTIME_LIMIT_REACHED to True
+    # Somewhere in the code, a `if` statement will check this variable 
+    def signal_handler(signum, frame):
+        global SLURM_JOB_WALLTIME_LIMIT_REACHED
+        SLURM_JOB_WALLTIME_LIMIT_REACHED = True
+    # Register the signal handler
+    signal.signal(signal.SIGUSR1, signal_handler)
+    
+    
     # get script arguments
     parser = argparse.ArgumentParser('DINO', parents=[get_args_parser()])
     args = parser.parse_args()
