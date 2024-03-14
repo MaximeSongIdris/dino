@@ -17,9 +17,10 @@ class COCODataset(Dataset):
         self,
         dataset,
         data_dir,
-        transform,
+        transform=None,
     ):
         super(COCODataset, self).__init__()
+        
         if dataset == 'COCO':
             ann_file = data_dir + '/annotations/instances_train2017.json'
             self.coco = COCO(ann_file)
@@ -41,8 +42,17 @@ class COCODataset(Dataset):
             self.fpaths = np.array(self.fpaths) # to avoid memory leak
         else:
             raise NotImplementedError
+            
         self.dataset = dataset
-        self.transform = transform
+        
+        if transform is not None:
+            self.transform = transform
+        else:
+            self.transform = transforms.Compose([
+                transforms.Resize(224),
+                transforms.ToTensor(),
+                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+            ])
 
     def __len__(self):
         if self.dataset == 'COCO':
@@ -79,8 +89,8 @@ class COCODataset(Dataset):
                 # transform our np.ndarray to torch.tensor 
                 # and resize from HxW to 224x224
                 one_hot_mask[..., i] = self.target_transform(mask)
-             
-            # transform image for training
+            
+            # transform image
             transfo_img = self.transform(image)
             
             # transform our np.ndarray to torch.tensor 
